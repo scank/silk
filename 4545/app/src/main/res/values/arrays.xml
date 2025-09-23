@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="model_names">
+        <item>deepseek-ai/DeepSeek-R1</item>
+        <item>deepseek-ai/DeepSeek-V3.1</item>
+        <item>Pro/deepseek-ai/DeepSeek-V3.1</item>
+        <item>Qwen/QwQ-32B</item>
+    </string-array>
+</resources>
