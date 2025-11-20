@@ -113,7 +113,14 @@ public class MainActivity extends AppCompatActivity {
             if (currentConfigId == -1) {
                 Toast.makeText(this, "请先选择智能体再刷新", Toast.LENGTH_SHORT).show();
             } else {
-                refreshCurrentConversation();
+                new AlertDialog.Builder(MainActivity.this)
+                    .setTitle("确认刷新")
+                    .setMessage("确定要刷新当前对话吗？这将清空当前会话并重新加载历史记录")
+                    .setPositiveButton("确定", (dialog, which) -> {
+                    refreshCurrentConversation();
+                    })
+                    .setNegativeButton("取消", null)
+                    .show();
             }
         });
         // ----------------------------------------------------------------
