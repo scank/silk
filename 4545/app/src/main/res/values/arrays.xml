@@ -1,9 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string-array name="model_names">
+        <item>deepseek-ai/DeepSeek-V3.1-Terminus</item>
+        <item>Pro/deepseek-ai/DeepSeek-V3.1-Terminus</item>
+        <item>deepseek-ai/DeepSeek-V3.2-Exp</item>
+        <item>Pro/deepseek-ai/DeepSeek-V3.2-Exp</item>
+        <item>ByteDance-Seed/Seed-OSS-36B-Instruct</item>
+        <item>MiniMaxAI/MiniMax-M1-80k</item>
+        <item>next is free</item>
+        <item>deepseek-ai/DeepSeek-R1-Distill-Qwen-7B</item>
+        <item>deepseek-ai/DeepSeek-R1-Distill-Qwen-14B</item>
+        <item>deepseek-ai/DeepSeek-R1-Distill-Qwen-32B</item>
         <item>deepseek-ai/DeepSeek-R1</item>
-        <item>deepseek-ai/DeepSeek-V3.1</item>
-        <item>Pro/deepseek-ai/DeepSeek-V3.1</item>
-        <item>Qwen/QwQ-32B</item>
+        <item>ascend-tribe/pangu-pro-moe</item>
     </string-array>
 </resources>
