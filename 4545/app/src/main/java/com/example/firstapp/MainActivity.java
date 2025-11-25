@@ -243,6 +243,9 @@ public class MainActivity extends AppCompatActivity {
             addMessage(message.getContent(), message.isUser());
         }
 
+        // 关键修改：将数据库记录同步到DeepSeekService的对话历史中
+        deepSeekService.rebuildConversationHistory(currentConfigId, messages);
+
         // 滚动到底部
         scrollView.post(() -> scrollView.fullScroll(ScrollView.FOCUS_DOWN));
     }
@@ -511,6 +514,8 @@ public class MainActivity extends AppCompatActivity {
             chatMessageCRUD.deleteMessagesByConfig(currentConfigId);
             chatContainer.removeAllViews();
             lastMessageId = View.NO_ID;
+            // 同步清空服务端历史
+            deepSeekService.clearHistory(currentConfigId);
             Toast.makeText(this, "聊天记录已删除", Toast.LENGTH_SHORT).show();
         }
         else {Toast.makeText(this,"未删除聊天记录",Toast.LENGTH_SHORT).show();}
@@ -576,8 +581,10 @@ public class MainActivity extends AppCompatActivity {
         lastMessageId = View.NO_ID;
         // 5. 加载新智能体的历史消息
         loadChatHistory();
-        // 6. 通知DeepSeekService切换对话历史（如果需要）
-        deepSeekService.clearHistory(configId); // 确保使用新的对话历史
+        // 6. 通知DeepSeekService切换对话历史
+        deepSeekService.clearHistory(configId);
+        List<ChatMessage> messages = chatMessageCRUD.getMessagesByConfig(configId);
+        deepSeekService.rebuildConversationHistory(configId, messages);
     }
 
     private void showRegretDialog() {
