@@ -592,6 +592,12 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, "请先选择智能体", Toast.LENGTH_SHORT).show();
             return;
         }
+        // 获取当前智能体配置和名称（修复变量未定义问题）
+        deepseek_config currentConfig = configCRUD.getConfigById(currentConfigId);
+        String agentName = currentConfig != null && currentConfig.getApiName() != null
+                ? currentConfig.getApiName()
+                : "AI"; // 兜底默认名称
+
 
         currentChatMessages = chatMessageCRUD.getMessagesByConfig(currentConfigId);
         if (currentChatMessages.isEmpty()) {
@@ -606,7 +612,7 @@ public class MainActivity extends AppCompatActivity {
         for (int i = 0; i < currentChatMessages.size(); i++) {
             ChatMessage msg = currentChatMessages.get(i);
             String time = sdf.format(new Date(msg.getTimestamp()));
-            String prefix = msg.isUser() ? "👤[" : "🤖[";
+            String prefix = msg.isUser() ? "👤 [" : agentName + "  [";
             String content = prefix + time + "] " +
                     (msg.getContent().length() > 15 ?
                             msg.getContent().substring(0, 15) + "..." : msg.getContent());
