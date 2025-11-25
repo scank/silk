@@ -7,11 +7,11 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.drawable.ColorDrawable;
 import android.os.Bundle;
-import android.os.Message;
 import android.util.DisplayMetrics;
 import android.view.ActionMode;
 import android.view.Gravity;
@@ -23,7 +23,6 @@ import android.view.ViewGroup;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
-import android.widget.LinearLayout;
 import android.widget.PopupWindow;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -71,6 +70,23 @@ public class MainActivity extends AppCompatActivity {
     private long currentConfigId = -1; // 当前使用的智能体配置ID
     private Button FreshButton;
     private List<ChatMessage> currentChatMessages = new ArrayList<>();
+
+    // 新增：保存最后使用智能体ID的常量和工具方法
+    private static final String PREFS_NAME = "LastUsedAgentPrefs";
+    private static final String KEY_LAST_AGENT_ID = "last_agent_id";
+
+    // 保存最后使用的智能体ID
+    private void saveLastUsedAgentId(long agentId) {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        prefs.edit().putLong(KEY_LAST_AGENT_ID, agentId).apply();
+    }
+
+    // 获取最后使用的智能体ID（默认-1表示无记录）
+    private long getLastUsedAgentId() {
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        return prefs.getLong(KEY_LAST_AGENT_ID, -1);
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -102,10 +118,25 @@ public class MainActivity extends AppCompatActivity {
         loadChatHistory();// 加载当前配置的聊天记录
         // ----------------------------------------------------------------
         currentAgentTextView = findViewById(R.id.currentAgentTextView);
-        // 初始化时尝试加载默认智能体
-        deepseek_config defaultConfig = configCRUD.getLatestConfig();
-        if (defaultConfig != null) {
-            switchAgent(defaultConfig.getId());
+        // 关键修改：优先加载最后使用的智能体，而非直接加载最新创建的
+        long lastAgentId = getLastUsedAgentId();
+        deepseek_config targetConfig = null;
+
+        // 1. 尝试加载最后使用的智能体
+        if (lastAgentId != -1) {
+            targetConfig = configCRUD.getConfigById(lastAgentId);
+        }
+
+        // 2. 若没有最后使用记录，再加载最新创建的智能体（保持原有逻辑）
+        if (targetConfig == null) {
+            targetConfig = configCRUD.getLatestConfig();
+        }
+
+        // 3. 加载目标智能体
+        if (targetConfig != null) {
+            switchAgent(targetConfig.getId());
+        } else {
+            currentAgentTextView.setText("当前智能体：未选择");
         }
         // ----------------------------------------------------------------
         FreshButton = findViewById(R.id.Fresh_button);
@@ -114,13 +145,13 @@ public class MainActivity extends AppCompatActivity {
                 Toast.makeText(this, "请先选择智能体再刷新", Toast.LENGTH_SHORT).show();
             } else {
                 new AlertDialog.Builder(MainActivity.this)
-                    .setTitle("确认刷新")
-                    .setMessage("确定要刷新当前对话吗？这将清空当前会话并重新加载历史记录")
-                    .setPositiveButton("确定", (dialog, which) -> {
-                    refreshCurrentConversation();
-                    })
-                    .setNegativeButton("取消", null)
-                    .show();
+                        .setTitle("确认刷新")
+                        .setMessage("确定要刷新当前对话吗？这将清空当前会话并重新加载历史记录")
+                        .setPositiveButton("确定", (dialog, which) -> {
+                            refreshCurrentConversation();
+                        })
+                        .setNegativeButton("取消", null)
+                        .show();
             }
         });
         // ----------------------------------------------------------------
@@ -133,6 +164,7 @@ public class MainActivity extends AppCompatActivity {
             return insets;
         });
     }
+
     private void sendMessage() {
         currentChatMessages.clear();
 
@@ -298,6 +330,7 @@ public class MainActivity extends AppCompatActivity {
             showKeyboard(inputField);
         });
     }
+
     private void toggleLeftSlideMenu() {
         if (isLeftMenuShowing) {
             leftSlideMenu.dismiss();
@@ -312,6 +345,7 @@ public class MainActivity extends AppCompatActivity {
             isLeftMenuShowing = true;
         }
     }
+
     private void initLeftSlideMenu() {
         // 1. 加载菜单布局
         LayoutInflater inflater = LayoutInflater.from(this);
@@ -504,6 +538,7 @@ public class MainActivity extends AppCompatActivity {
         // 实现主题切换逻辑
         Toast.makeText(this, "这个按钮还没写功能", Toast.LENGTH_SHORT).show();
     }
+
     private void refreshCurrentConversation() {
         // 安全校验（虽然点击事件已处理，但双重保险）
         if (currentConfigId == -1) return;
@@ -523,11 +558,15 @@ public class MainActivity extends AppCompatActivity {
             addMessage("【系统提示】" + systemPrompt, false);
         }
     }
+
     @SuppressLint("SetTextI18n")
     private void switchAgent(long configId) {
         // 1. 更新当前智能体ID
         this.currentConfigId = configId;
-        // 2. 获取智能体配置
+        // 新增：保存当前智能体为最后使用的智能体
+        saveLastUsedAgentId(configId);
+
+        // 原有代码保持不变
         deepseek_config config = configCRUD.getConfigById(configId);
         if (config == null) return;
         // 3. 更新界面显示的智能体名称
@@ -540,6 +579,7 @@ public class MainActivity extends AppCompatActivity {
         // 6. 通知DeepSeekService切换对话历史（如果需要）
         deepSeekService.clearHistory(configId); // 确保使用新的对话历史
     }
+
     private void showRegretDialog() {
         if (currentConfigId == -1) {
             Toast.makeText(this, "请先选择智能体", Toast.LENGTH_SHORT).show();
@@ -582,6 +622,7 @@ public class MainActivity extends AppCompatActivity {
                 .setNegativeButton("取消", null)
                 .show();
     }
+
     private void checkCurrentAgentValidity() {
         if (currentConfigId != -1) {
             deepseek_config config = configCRUD.getConfigById(currentConfigId);
@@ -590,9 +631,12 @@ public class MainActivity extends AppCompatActivity {
                 currentConfigId = -1;
                 currentAgentTextView.setText("当前智能体：未选择");
                 chatContainer.removeAllViews();
+                // 新增：清除保存的无效智能体ID
+                saveLastUsedAgentId(-1);
             }
         }
     }
+
     private void showKeyboard(View view) {
         InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
         if (imm != null) {
