@@ -9,15 +9,16 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
-import android.graphics.Rect;
 import android.graphics.drawable.ColorDrawable;
 import android.os.Bundle;
 import android.util.DisplayMetrics;
 import android.view.ActionMode;
+import android.view.GestureDetector;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.InputMethodManager;
@@ -33,6 +34,7 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.constraintlayout.widget.ConstraintLayout;
 import androidx.core.graphics.Insets;
+import androidx.core.view.GestureDetectorCompat;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.widget.NestedScrollView;
@@ -48,9 +50,9 @@ public class MainActivity extends AppCompatActivity {
     private TextView currentAgentTextView; // 显示当前智能体的TextView
     // 下拉控件声明
     private PopupWindow dropdownMenu;
-    private boolean isMenuShowing = false; //看是否已经打开
-    private Button Myside_R_button;   //声明控件
-    //左滑菜单
+    private boolean isMenuShowing = false; // 看是否已经打开
+    private Button Myside_R_button;   // 声明控件
+    // 左滑菜单
     private PopupWindow leftSlideMenu;
     private View menuLeftView;
     private boolean isLeftMenuShowing = false;
@@ -62,14 +64,21 @@ public class MainActivity extends AppCompatActivity {
     private Button sendButton;
     private NestedScrollView scrollView; // 关键修改
     private int lastMessageId = View.NO_ID;
-    //api调用声明
+    // api调用声明
     private DeepSeekService deepSeekService;
-    //聊天记录
+    // 聊天记录
     private ConfigCRUD configCRUD;
     private ChatMessageCRUD chatMessageCRUD;
     private long currentConfigId = -1; // 当前使用的智能体配置ID
     private Button FreshButton;
     private List<ChatMessage> currentChatMessages = new ArrayList<>();
+
+    // 新增：手势检测相关变量
+    private GestureDetectorCompat gestureDetector;
+    private static final int SWIPE_THRESHOLD = 80; // 滑动触发距离阈值(dp)
+    private static final int SWIPE_VELOCITY_THRESHOLD = 5; // 滑动速度阈值
+    private float startX;
+    private boolean isSliding = false;
 
     // 新增：保存最后使用智能体ID的常量和工具方法
     private static final String PREFS_NAME = "LastUsedAgentPrefs";
@@ -92,11 +101,15 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         EdgeToEdge.enable(this);
         setContentView(R.layout.activity_main);
+
+        // 初始化手势检测器
+        initGestureDetector();
+
         // -----------------------------------------------------------
-        Myside_R_button = findViewById(R.id.side_R_button);//找到控件
+        Myside_R_button = findViewById(R.id.side_R_button);// 找到控件
         Myside_R_button.post(this::initDropdownMenu);// 延迟初始化确保获取正确宽度
         Myside_R_button.setOnClickListener(v -> toggleDropdownMenu());// 绑定点击事件
-        initDropdownMenu();//实现
+        initDropdownMenu();// 实现
         // -----------------------------------------------------------
         Myside_L_button = findViewById(R.id.side_L_button);
         mainLayout = findViewById(R.id.main); // 假设根布局的id是main
@@ -108,6 +121,10 @@ public class MainActivity extends AppCompatActivity {
         sendButton = findViewById(R.id.Enter_button);
         scrollView = findViewById(R.id.scrollView);
         sendButton.setOnClickListener(v -> sendMessage());// 发送按钮点击监听
+
+        // 关键修改：为对话区域设置触摸监听器
+        setupChatAreaTouchListener();
+
         // ----------------------------------------------------------------
         deepSeekService = new DeepSeekService(); // 初始化
         // ----------------------------------------------------------------
@@ -165,6 +182,67 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    // 关键修改：为对话区域设置触摸监听器
+    private void setupChatAreaTouchListener() {
+        scrollView.setOnTouchListener((v, event) -> {
+            // 将触摸事件传递给手势检测器
+            return gestureDetector.onTouchEvent(event);
+        });
+    }
+
+    // 初始化手势检测器
+    private void initGestureDetector() {
+        gestureDetector = new GestureDetectorCompat(this, new GestureDetector.SimpleOnGestureListener() {
+            @Override
+            public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
+                float diffX = e2.getX() - e1.getX();
+                float diffY = e2.getY() - e1.getY();
+
+                // 检测从左向右的水平滑动（距离和速度达标）
+                if (Math.abs(diffX) > Math.abs(diffY)
+                        && diffX > SWIPE_THRESHOLD
+                        && Math.abs(velocityX) > SWIPE_VELOCITY_THRESHOLD) {
+                    if (!isLeftMenuShowing) {
+                        toggleLeftSlideMenu(); // 显示左侧菜单
+                    }
+                    return true;
+                }
+                // 检测从右向左滑动关闭菜单
+                else if (Math.abs(diffX) > Math.abs(diffY)
+                        && diffX < -SWIPE_THRESHOLD
+                        && Math.abs(velocityX) > SWIPE_VELOCITY_THRESHOLD) {
+                    if (isLeftMenuShowing) {
+                        toggleLeftSlideMenu(); // 隐藏左侧菜单
+                    }
+                    return true;
+                }
+                return false;
+            }
+
+            @Override
+            public boolean onDown(MotionEvent e) {
+                startX = e.getX();
+                isSliding = false;
+                return true; // 必须返回true以接收后续事件
+            }
+
+            @Override
+            public boolean onScroll(MotionEvent e1, MotionEvent e2, float distanceX, float distanceY) {
+                // 限制仅左侧边缘可触发滑动（50dp范围内）
+                if (startX < getResources().getDimensionPixelSize(R.dimen.slide_edge_width)) {
+                    isSliding = true;
+                }
+                return super.onScroll(e1, e2, distanceX, distanceY);
+            }
+        });
+    }
+
+    // 移除Activity级别的触摸事件处理，只保留对话区域的手势检测
+    // @Override
+    // public boolean onTouchEvent(MotionEvent event) {
+    //     return gestureDetector.onTouchEvent(event) || super.onTouchEvent(event);
+    // }
+
     private void sendMessage() {
         currentChatMessages.clear();
 
@@ -189,7 +267,7 @@ public class MainActivity extends AppCompatActivity {
             });
 
             // 传递config对象给DeepSeekService
-            deepSeekService.chat(text, config, new DeepSeekService.DeepSeekCallback(){
+            deepSeekService.chat(text, config, new DeepSeekService.DeepSeekCallback() {
                 @Override
                 public void onResponse(String response) {
                     runOnUiThread(() -> {
@@ -292,7 +370,8 @@ public class MainActivity extends AppCompatActivity {
             }
 
             @Override
-            public void onDestroyActionMode(ActionMode mode) {}
+            public void onDestroyActionMode(ActionMode mode) {
+            }
         });
 
         // 设置布局参数（保持原有布局代码）
@@ -337,6 +416,7 @@ public class MainActivity extends AppCompatActivity {
     private void toggleLeftSlideMenu() {
         if (isLeftMenuShowing) {
             leftSlideMenu.dismiss();
+            scrollView.setEnabled(true); // 菜单隐藏时恢复滚动
         } else {
             // 从左侧滑出
             leftSlideMenu.showAtLocation(
@@ -346,6 +426,7 @@ public class MainActivity extends AppCompatActivity {
                     0
             );
             isLeftMenuShowing = true;
+            scrollView.setEnabled(false); // 菜单显示时禁用滚动，避免冲突
         }
     }
 
@@ -361,7 +442,7 @@ public class MainActivity extends AppCompatActivity {
         // 3. 配置PopupWindow
         leftSlideMenu = new PopupWindow(
                 menuLeftView,
-                (int)(getScreenWidth() * 0.7), // 宽度为屏幕70%
+                (int) (getScreenWidth() * 0.7), // 宽度为屏幕70%
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 true
         );
@@ -402,6 +483,7 @@ public class MainActivity extends AppCompatActivity {
         leftSlideMenu.setOnDismissListener(() -> {
             coverWindow.dismiss();
             isLeftMenuShowing = false; // 状态更新
+            scrollView.setEnabled(true); // 恢复滚动
         });
 
         // 修改按钮点击逻辑
@@ -416,6 +498,7 @@ public class MainActivity extends AppCompatActivity {
                         0
                 );
                 isLeftMenuShowing = true;
+                scrollView.setEnabled(false); // 禁用滚动
             } else {
                 leftSlideMenu.dismiss();
             }
@@ -476,7 +559,7 @@ public class MainActivity extends AppCompatActivity {
             Myside_R_button.getLocationOnScreen(location);
 
             // 动态计算菜单宽度（示例为按钮宽度的1.5倍）
-            int menuWidth = (int)(Myside_R_button.getWidth() * 2);
+            int menuWidth = (int) (Myside_R_button.getWidth() * 2);
 
             // 获取屏幕尺寸
             DisplayMetrics metrics = new DisplayMetrics();
@@ -484,7 +567,7 @@ public class MainActivity extends AppCompatActivity {
 
             // 确保不超过屏幕右边界
             int maxRight = metrics.widthPixels - menuWidth;
-            int finalX = Math.max(location[0] - (menuWidth - Myside_R_button.getWidth())/2, 0);
+            int finalX = Math.max(location[0] - (menuWidth - Myside_R_button.getWidth()) / 2, 0);
             finalX = Math.min(finalX, maxRight);
 
             // 更新PopupWindow宽度
@@ -504,8 +587,12 @@ public class MainActivity extends AppCompatActivity {
     // 处理菜单项点击
     private void handleMenuItemClick(int itemId) {
         switch (itemId) {
-            case 1: clearChatHistory();break; // 聊天记录已经删除
-            case 2: toggleAppTheme();break; // 聊天记录已经清空
+            case 1:
+                clearChatHistory();
+                break; // 聊天记录已经删除
+            case 2:
+                toggleAppTheme();
+                break; // 聊天记录已经清空
         }
     }
 
@@ -517,8 +604,9 @@ public class MainActivity extends AppCompatActivity {
             // 同步清空服务端历史
             deepSeekService.clearHistory(currentConfigId);
             Toast.makeText(this, "聊天记录已删除", Toast.LENGTH_SHORT).show();
+        } else {
+            Toast.makeText(this, "未删除聊天记录", Toast.LENGTH_SHORT).show();
         }
-        else {Toast.makeText(this,"未删除聊天记录",Toast.LENGTH_SHORT).show();}
     }
 
     @Override
@@ -626,7 +714,7 @@ public class MainActivity extends AppCompatActivity {
                     long selectedTimestamp = currentChatMessages.get(which).getTimestamp();
                     chatMessageCRUD.deleteMessagesAfterTimestamp(currentConfigId, selectedTimestamp);
                     // 2. 重建服务端记忆（保留回溯点之前的记录）
-                    List<ChatMessage> validMessages = currentChatMessages.subList(0, which+1);
+                    List<ChatMessage> validMessages = currentChatMessages.subList(0, which + 1);
                     deepSeekService.rebuildConversationHistory(currentConfigId, validMessages);
                     // 3. 刷新界面
                     loadChatHistory();
