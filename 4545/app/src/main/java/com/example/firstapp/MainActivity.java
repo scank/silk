@@ -23,9 +23,11 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
+import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.PopupWindow;
 import android.widget.ScrollView;
+import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -73,6 +75,11 @@ public class MainActivity extends AppCompatActivity {
     private Button FreshButton;
     private List<ChatMessage> currentChatMessages = new ArrayList<>();
 
+    // 新增：流式输出相关变量
+    private boolean isStreamEnabled = false;
+    private TextView currentAiMessageView;
+    private String currentStreamResponse = "";
+
     // 新增：手势检测相关变量
     private GestureDetectorCompat gestureDetector;
     private static final int SWIPE_THRESHOLD = 80; // 滑动触发距离阈值(dp)
@@ -83,6 +90,7 @@ public class MainActivity extends AppCompatActivity {
     // 新增：保存最后使用智能体ID的常量和工具方法
     private static final String PREFS_NAME = "LastUsedAgentPrefs";
     private static final String KEY_LAST_AGENT_ID = "last_agent_id";
+    private static final String KEY_STREAM_ENABLED = "stream_enabled";
 
     // 保存最后使用的智能体ID
     private void saveLastUsedAgentId(long agentId) {
@@ -155,6 +163,11 @@ public class MainActivity extends AppCompatActivity {
         } else {
             currentAgentTextView.setText("当前智能体：未选择");
         }
+
+        // 加载流式输出设置
+        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        isStreamEnabled = prefs.getBoolean(KEY_STREAM_ENABLED, false);
+
         // ----------------------------------------------------------------
         FreshButton = findViewById(R.id.Fresh_button);
         FreshButton.setOnClickListener(v -> {
@@ -183,6 +196,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // 关键修改：为对话区域设置触摸监听器
+    @SuppressLint("ClickableViewAccessibility")
     private void setupChatAreaTouchListener() {
         scrollView.setOnTouchListener((v, event) -> {
             // 将触摸事件传递给手势检测器
@@ -237,12 +251,6 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    // 移除Activity级别的触摸事件处理，只保留对话区域的手势检测
-    // @Override
-    // public boolean onTouchEvent(MotionEvent event) {
-    //     return gestureDetector.onTouchEvent(event) || super.onTouchEvent(event);
-    // }
-
     private void sendMessage() {
         currentChatMessages.clear();
 
@@ -266,8 +274,12 @@ public class MainActivity extends AppCompatActivity {
                 showKeyboard(inputField);  // 强制显示键盘
             });
 
+            // 重置流式响应变量
+            currentStreamResponse = "";
+            currentAiMessageView = null;
+
             // 传递config对象给DeepSeekService
-            deepSeekService.chat(text, config, new DeepSeekService.DeepSeekCallback() {
+            deepSeekService.chat(text, config, isStreamEnabled, new DeepSeekService.DeepSeekCallback() {
                 @Override
                 public void onResponse(String response) {
                     runOnUiThread(() -> {
@@ -280,6 +292,37 @@ public class MainActivity extends AppCompatActivity {
                         );
                         chatMessageCRUD.createMessage(aiMessage);
                         addMessage(response, false);
+                    });
+                }
+
+                @Override
+                public void onStreamResponse(String partialResponse) {
+                    runOnUiThread(() -> {
+                        currentStreamResponse += partialResponse;
+                        if (currentAiMessageView == null) {
+                            // 首次收到流数据时创建消息视图
+                            currentAiMessageView = addMessage(currentStreamResponse, false);
+                        } else {
+                            // 后续流数据更新现有视图
+                            currentAiMessageView.setText(currentStreamResponse);
+                        }
+                        scrollView.post(() -> scrollView.fullScroll(ScrollView.FOCUS_DOWN));
+                    });
+                }
+
+                @Override
+                public void onStreamComplete(String fullResponse) {
+                    runOnUiThread(() -> {
+                        // 流结束时保存完整消息
+                        ChatMessage aiMessage = new ChatMessage(
+                                fullResponse,
+                                false,
+                                System.currentTimeMillis(),
+                                currentConfigId
+                        );
+                        chatMessageCRUD.createMessage(aiMessage);
+                        currentAiMessageView = null;
+                        currentStreamResponse = "";
                     });
                 }
 
@@ -328,7 +371,7 @@ public class MainActivity extends AppCompatActivity {
         scrollView.post(() -> scrollView.fullScroll(ScrollView.FOCUS_DOWN));
     }
 
-    private void addMessage(String text, boolean isUser) {
+    private TextView addMessage(String text, boolean isUser) {
         // 创建消息文本视图
         TextView textView = new TextView(this);
         textView.setId(View.generateViewId());
@@ -411,6 +454,8 @@ public class MainActivity extends AppCompatActivity {
             inputField.requestFocus();
             showKeyboard(inputField);
         });
+
+        return textView;
     }
 
     private void toggleLeftSlideMenu() {
@@ -439,6 +484,22 @@ public class MainActivity extends AppCompatActivity {
         Button btnSettings = menuLeftView.findViewById(R.id.btn_settings);
         Button btnTags = menuLeftView.findViewById(R.id.btn_tags);
         Button btn_new = menuLeftView.findViewById(R.id.btn_new);
+
+        // 初始化流式输出开关
+        Switch streamSwitch = menuLeftView.findViewById(R.id.stream_switch);
+        streamSwitch.setChecked(isStreamEnabled);
+        streamSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            isStreamEnabled = isChecked;
+            // 保存状态到SharedPreferences
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                    .edit()
+                    .putBoolean(KEY_STREAM_ENABLED, isChecked)
+                    .apply();
+            Toast.makeText(MainActivity.this,
+                    isChecked ? "已开启流式输出" : "已关闭流式输出",
+                    Toast.LENGTH_SHORT).show();
+        });
+
         // 3. 配置PopupWindow
         leftSlideMenu = new PopupWindow(
                 menuLeftView,

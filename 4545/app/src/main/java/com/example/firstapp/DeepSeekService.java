@@ -2,7 +2,10 @@ package com.example.firstapp;
 
 import android.util.Log;
 import com.google.gson.Gson;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -44,10 +47,12 @@ public class DeepSeekService {
 
     public interface DeepSeekCallback {
         void onResponse(String response);
+        void onStreamResponse(String partialResponse);
+        void onStreamComplete(String fullResponse);
         void onFailure(String error);
     }
 
-    public void chat(String userMessage, deepseek_config config, DeepSeekCallback callback) {
+    public void chat(String userMessage, deepseek_config config, boolean isStream, DeepSeekCallback callback) {
         if (config == null) {
             callback.onFailure("智能体配置不能为空");
             return;
@@ -76,7 +81,7 @@ public class DeepSeekService {
                     config.getMaxTokens() : DEFAULT_MAX_TOKENS;
             chatRequest.top_p = config.getTopP() > 0 ?
                     config.getTopP() : DEFAULT_TOP_P;
-            chatRequest.stream = false; // 根据需求设置流式响应
+            chatRequest.stream = isStream;
 
             Request request = new Request.Builder()
                     .url(BASE_URL + "/chat/completions")
@@ -101,18 +106,48 @@ public class DeepSeekService {
                             throw new IOException("HTTP " + response.code() + ": " + errorBody);
                         }
 
-                        String responseBody = response.body().string();
-                        ChatResponse chatResponse = gson.fromJson(responseBody, ChatResponse.class);
+                        if (isStream) {
+                            // 处理流式响应
+                            InputStream inputStream = response.body().byteStream();
+                            BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
+                            String line;
+                            StringBuilder fullResponse = new StringBuilder();
 
-                        if (chatResponse.choices == null || chatResponse.choices.isEmpty()) {
-                            throw new IOException("API返回空响应");
+                            while ((line = reader.readLine()) != null) {
+                                if (line.isEmpty() || line.startsWith(":")) continue;
+                                if (line.equals("data: [DONE]")) break;
+
+                                if (line.startsWith("data: ")) {
+                                    String json = line.substring(6);
+                                    StreamChatResponse chatResponse = gson.fromJson(json, StreamChatResponse.class);
+                                    if (chatResponse.choices != null && !chatResponse.choices.isEmpty()) {
+                                        String partial = chatResponse.choices.get(0).delta.content;
+                                        if (partial != null) {
+                                            fullResponse.append(partial);
+                                            callback.onStreamResponse(partial);
+                                        }
+                                    }
+                                }
+                            }
+
+                            String aiResponse = fullResponse.toString();
+                            getConversationHistory(configId).add(new Message("assistant", aiResponse));
+                            callback.onStreamComplete(aiResponse);
+                        } else {
+                            // 处理非流式响应
+                            String responseBody = response.body().string();
+                            ChatResponse chatResponse = gson.fromJson(responseBody, ChatResponse.class);
+
+                            if (chatResponse.choices == null || chatResponse.choices.isEmpty()) {
+                                throw new IOException("API返回空响应");
+                            }
+
+                            String aiResponse = chatResponse.choices.get(0).message.content;
+                            getConversationHistory(configId).add(new Message("assistant", aiResponse));
+                            callback.onResponse(aiResponse);
                         }
-
-                        String aiResponse = chatResponse.choices.get(0).message.content;
-                        getConversationHistory(configId).add(new Message("assistant", aiResponse));
-                        callback.onResponse(aiResponse);
                     } catch (Exception e) {
-                        Log.e(TAG, "处理响应错误", e);
+                        Log.e(TAG, "处理响应响应错误", e);
                         callback.onFailure(e.getMessage());
                     }
                 }
@@ -167,6 +202,18 @@ public class DeepSeekService {
 
     private static class ChatResponse {
         List<Choice> choices;
+    }
+
+    private static class StreamChatResponse {
+        List<StreamChoice> choices;
+    }
+
+    private static class StreamChoice {
+        StreamMessage delta;
+    }
+
+    private static class StreamMessage {
+        String content;
     }
 
     private static class Choice {
