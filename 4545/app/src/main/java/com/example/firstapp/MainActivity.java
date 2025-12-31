@@ -25,6 +25,7 @@ import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.CompoundButton;
 import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.PopupWindow;
 import android.widget.ScrollView;
 import android.widget.Switch;
@@ -66,7 +67,7 @@ public class MainActivity extends AppCompatActivity {
     private Button sendButton;
     private NestedScrollView scrollView; // 关键修改
     private int lastMessageId = View.NO_ID;
-    // api调用声明
+    // api调用调用声明
     private DeepSeekService deepSeekService;
     // 聊天记录
     private ConfigCRUD configCRUD;
@@ -80,7 +81,7 @@ public class MainActivity extends AppCompatActivity {
     private TextView currentAiMessageView;
     private String currentStreamResponse = "";
 
-    // 新增：手势检测相关变量
+    // 新增：手势检测检测相关变量
     private GestureDetectorCompat gestureDetector;
     private static final int SWIPE_THRESHOLD = 80; // 滑动触发距离阈值(dp)
     private static final int SWIPE_VELOCITY_THRESHOLD = 5; // 滑动速度阈值
@@ -88,9 +89,16 @@ public class MainActivity extends AppCompatActivity {
     private boolean isSliding = false;
 
     // 新增：保存最后使用智能体ID的常量和工具方法
-    private static final String PREFS_NAME = "LastUsedAgentPrefs";
+    private static final  String PREFS_NAME = "LastUsedAgentPrefs";
     private static final String KEY_LAST_AGENT_ID = "last_agent_id";
     private static final String KEY_STREAM_ENABLED = "stream_enabled";
+
+    // 新增：悬浮按钮相关变量
+    private LinearLayout floatActions;
+    private Button btnPrevAnswer;
+    private Button btnScrollTop;
+    private boolean isFloatActionsVisible = false;
+    private static final int SCROLL_THRESHOLD = 300; // 滚动多少距离后显示悬浮按钮
 
     // 保存最后使用的智能体ID
     private void saveLastUsedAgentId(long agentId) {
@@ -109,6 +117,9 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         EdgeToEdge.enable(this);
         setContentView(R.layout.activity_main);
+
+        // 初始化悬浮按钮
+        initFloatActions();
 
         // 初始化手势检测器
         initGestureDetector();
@@ -129,6 +140,9 @@ public class MainActivity extends AppCompatActivity {
         sendButton = findViewById(R.id.Enter_button);
         scrollView = findViewById(R.id.scrollView);
         sendButton.setOnClickListener(v -> sendMessage());// 发送按钮点击监听
+
+        // 设置滚动监听，用于显示/隐藏悬浮按钮
+        setupScrollListener();
 
         // 关键修改：为对话区域设置触摸监听器
         setupChatAreaTouchListener();
@@ -195,6 +209,180 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    // 初始化悬浮按钮
+    private void initFloatActions() {
+        floatActions = findViewById(R.id.float_actions);
+        btnPrevAnswer = findViewById(R.id.btn_prev_answer);
+        btnScrollTop = findViewById(R.id.btn_scroll_top);
+
+        // 设置按钮点击事件
+        btnScrollTop.setOnClickListener(v -> scrollToTop());
+        btnPrevAnswer.setOnClickListener(v -> scrollToPreviousConversation());
+    }
+
+    // 设置滚动监听，控制悬浮按钮显示/隐藏
+    private void setupScrollListener() {
+        scrollView.setOnScrollChangeListener((NestedScrollView.OnScrollChangeListener) (v, scrollX, scrollY, oldScrollX, oldScrollY) -> {
+            // 当滚动距离超过阈值且是向下滚动时显示悬浮按钮
+            if (scrollY > SCROLL_THRESHOLD && scrollY < oldScrollY && !isFloatActionsVisible) {
+                showFloatActions();
+            }
+            // 当滚动到顶部或向上滚动时隐藏悬浮按钮
+            else if ((scrollY <= SCROLL_THRESHOLD || scrollY > oldScrollY) && isFloatActionsVisible) {
+                hideFloatActions();
+            }
+        });
+    }
+
+    // 显示悬浮按钮
+    private void showFloatActions() {
+        floatActions.setVisibility(View.VISIBLE);
+        isFloatActionsVisible = true;
+        // 淡入动画
+        floatActions.animate()
+                .alpha(1.0f)
+                .setDuration(300)
+                .start();
+    }
+
+    // 隐藏悬浮按钮
+    private void hideFloatActions() {
+        // 淡出动画
+        floatActions.animate()
+                .alpha(0.0f)
+                .setDuration(300)
+                .withEndAction(() -> {
+                    floatActions.setVisibility(View.GONE);
+                    isFloatActionsVisible = false;
+                })
+                .start();
+    }
+
+    /**
+     * 修正：滚动到最开始的AI消息位置（而非ScrollView顶部）
+     */
+    private void scrollToTop() {
+        if (chatContainer.getChildCount() == 0) {
+            Toast.makeText(this, "暂无聊天记录", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // 遍历所有消息，找到第一条AI消息（靠左显示的消息）
+        for (int i = 0; i < chatContainer.getChildCount(); i++) {
+            View child = chatContainer.getChildAt(i);
+            ConstraintLayout.LayoutParams params = (ConstraintLayout.LayoutParams) child.getLayoutParams();
+
+            // 判断是否是AI消息（靠左显示：startToStart绑定到父布局）
+            if (params != null && params.startToStart == ConstraintLayout.LayoutParams.PARENT_ID) {
+                int[] targetLocation = new int[2];
+                child.getLocationOnScreen(targetLocation);
+
+                // 计算滚动目标位置（预留顶部边距）
+                int targetScrollY = targetLocation[1] - scrollView.getPaddingTop() - getStatusBarHeight() - 40;
+                scrollView.smoothScrollTo(0, Math.max(0, targetScrollY));
+                hideFloatActions();
+                return;
+            }
+        }
+
+        // 若没有AI消息，默认滚动到顶部
+        scrollView.smoothScrollTo(0, 0);
+        hideFloatActions();
+    }
+
+    /**
+     * 修正：滚动到当前可见区域的上一个完整对话（用户提问+AI回复）
+     */
+    private void scrollToPreviousConversation() {
+        if (chatContainer.getChildCount() == 0) {
+            Toast.makeText(this, "暂无聊天记录", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        int currentScrollY = scrollView.getScrollY();
+        int scrollViewHeight = scrollView.getHeight();
+        int currentMessageIndex = -1;
+
+        // 步骤1：找到当前滚动位置可见区域内的"当前消息"（优先选择可见区域偏下的消息）
+        for (int i = 0; i < chatContainer.getChildCount(); i++) {
+            View child = chatContainer.getChildAt(i);
+            int[] location = new int[2];
+            child.getLocationOnScreen(location);
+
+            // 转换为相对于ScrollView的坐标
+            int viewTop = location[1] - scrollView.getPaddingTop() - getStatusBarHeight();
+            int viewBottom = viewTop + child.getHeight();
+
+            // 判断消息是否在可见区域内
+            boolean isVisible = (viewBottom > currentScrollY) && (viewTop < currentScrollY + scrollViewHeight);
+            if (isVisible) {
+                currentMessageIndex = i;
+                // 继续遍历，找到可见区域内最后一个消息（更贴近用户当前查看位置）
+            }
+        }
+
+        // 极端情况：未找到可见消息，默认从最后一条开始
+        if (currentMessageIndex == -1) {
+            currentMessageIndex = chatContainer.getChildCount() - 1;
+        }
+
+        // 步骤2：从当前消息位置向前查找完整对话（AI消息+对应的用户消息）
+        int targetAiIndex = -1;
+        // 先找到当前位置前最近的AI消息
+        for (int i = currentMessageIndex - 1; i >= 0; i--) {
+            View child = chatContainer.getChildAt(i);
+            ConstraintLayout.LayoutParams params = (ConstraintLayout.LayoutParams) child.getLayoutParams();
+
+            // 判断是否是AI消息（靠左显示）
+            if (params != null && params.startToStart == ConstraintLayout.LayoutParams.PARENT_ID) {
+                targetAiIndex = i;
+                break;
+            }
+        }
+
+        // 如果找到AI消息，再向前找对应的用户消息（组成完整对话）
+        if (targetAiIndex != -1) {
+            for (int i = targetAiIndex - 1; i >= 0; i--) {
+                View child = chatContainer.getChildAt(i);
+                ConstraintLayout.LayoutParams params = (ConstraintLayout.LayoutParams) child.getLayoutParams();
+
+                // 判断是否是用户消息（靠右显示）
+                if (params != null && params.endToEnd == ConstraintLayout.LayoutParams.PARENT_ID) {
+                    // 滚动到用户消息位置（完整对话的起点）
+                    int[] targetLocation = new int[2];
+                    child.getLocationOnScreen(targetLocation);
+
+                    // 计算滚动目标位置（使对话在屏幕中间偏上）
+                    int targetScrollY = targetLocation[1] - scrollView.getPaddingTop() - getStatusBarHeight() - (scrollViewHeight / 3);
+                    scrollView.smoothScrollTo(0, Math.max(0, targetScrollY));
+                    hideFloatActions();
+                    return;
+                }
+            }
+
+            // 如果没有找到对应的用户消息，直接滚动到AI消息
+            View targetView = chatContainer.getChildAt(targetAiIndex);
+            int[] targetLocation = new int[2];
+            targetView.getLocationOnScreen(targetLocation);
+            int targetScrollY = targetLocation[1] - scrollView.getPaddingTop() - getStatusBarHeight() - (scrollViewHeight / 3);
+            scrollView.smoothScrollTo(0, Math.max(0, targetScrollY));
+            hideFloatActions();
+        } else {
+            Toast.makeText(this, "没有更早的对话", Toast.LENGTH_SHORT).show();
+            scrollToTop();
+        }
+    }
+
+    // 获取状态栏高度（辅助计算滚动位置）
+    private int getStatusBarHeight() {
+        int result = 0;
+        int resourceId = getResources().getIdentifier("status_bar_height", "dimen", "android");
+        if (resourceId > 0) {
+            result = getResources().getDimensionPixelSize(resourceId);
+        }
+        return result;
+    }
+
     // 关键修改：为对话区域设置触摸监听器
     @SuppressLint("ClickableViewAccessibility")
     private void setupChatAreaTouchListener() {
@@ -204,11 +392,16 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    // 初始化手势检测器
+    // 初始化手势检测器（修复空指针异常）
     private void initGestureDetector() {
         gestureDetector = new GestureDetectorCompat(this, new GestureDetector.SimpleOnGestureListener() {
             @Override
             public boolean onFling(MotionEvent e1, MotionEvent e2, float velocityX, float velocityY) {
+                // 关键修复：空值检查，避免NullPointerException
+                if (e1 == null || e2 == null) {
+                    return false;
+                }
+
                 float diffX = e2.getX() - e1.getX();
                 float diffY = e2.getY() - e1.getY();
 
@@ -417,7 +610,7 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // 设置布局参数（保持原有布局代码）
+        // 设置布局参数
         ConstraintLayout.LayoutParams params = new ConstraintLayout.LayoutParams(
                 ConstraintLayout.LayoutParams.WRAP_CONTENT,
                 ConstraintLayout.LayoutParams.WRAP_CONTENT
@@ -540,7 +733,7 @@ public class MainActivity extends AppCompatActivity {
                 ViewGroup.LayoutParams.MATCH_PARENT
         );
 
-        // 设置关闭监听（关键修复）
+        // 设置关闭监听
         leftSlideMenu.setOnDismissListener(() -> {
             coverWindow.dismiss();
             isLeftMenuShowing = false; // 状态更新
@@ -741,12 +934,11 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, "请先选择智能体", Toast.LENGTH_SHORT).show();
             return;
         }
-        // 获取当前智能体配置和名称（修复变量未定义问题）
+        // 获取当前智能体配置和名称
         deepseek_config currentConfig = configCRUD.getConfigById(currentConfigId);
         String agentName = currentConfig != null && currentConfig.getApiName() != null
                 ? currentConfig.getApiName()
                 : "AI"; // 兜底默认名称
-
 
         currentChatMessages = chatMessageCRUD.getMessagesByConfig(currentConfigId);
         if (currentChatMessages.isEmpty()) {
